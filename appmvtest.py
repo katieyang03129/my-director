@@ -7,76 +7,65 @@ try:
 except:
     from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips, CompositeVideoClip
 
-# --- 1. 配置與權限 ---
-st.set_page_config(page_title="MV Visual Director (Budget Manager)", layout="wide")
+# --- 1. 配置與安全 ---
+st.set_page_config(page_title="MV Visual Director 24.5 (Secure)", layout="wide")
 
-# 從後台讀取金鑰
-API_KEY = st.secrets.get("OPENAI_API_KEY", "")
+# 【安全修正】從 Streamlit Secrets 讀取，不准寫在程式碼裡
+if "OPENAI_API_KEY" in st.secrets:
+    API_KEY = st.secrets["OPENAI_API_KEY"]
+else:
+    st.error("❌ 請在 Streamlit Secrets 設置 OPENAI_API_KEY")
+    st.stop()
 
 IMG_DIR = "generated_frames"
 if not os.path.exists(IMG_DIR): os.makedirs(IMG_DIR)
 
-# 初始化狀態
 if "global_v" not in st.session_state: st.session_state.global_v = 0
 if "row_versions" not in st.session_state: st.session_state.row_versions = {}
 
-# --- 2. 側邊欄：模型與預算控制台 ---
+# --- 2. 側邊欄：模型與素材 ---
 with st.sidebar:
-    st.header("🔑 導演認證")
-    director_pw = st.text_input("輸入導演通行碼", type="password")
-    if director_pw != st.secrets.get("DIRECTOR_PASSWORD", "mv888"):
-        st.warning("請輸入正確密碼以解鎖")
-        st.stop()
-
-    st.success("認證成功！")
-    st.divider()
-
-    # --- 🤖 模型與預算配置 ---
-    st.header("🤖 模型與預算配置")
+    st.header("🤖 模型配置與預算")
     
-    st.info("📜 **編劇：gpt-4o-mini**")
-    st.caption("💰 價格：極便宜 (NT$ 0.01 可寫好幾首歌)")
-    
-    image_model = st.selectbox(
+    # 讓妳選產圖畫師
+    image_model_choice = st.selectbox(
         "🎨 選擇產圖畫師",
-        ["DALL-E 3 (精美/影視感)", "DALL-E 2 (便宜/意境感)"],
+        ["DALL-E 3 (精美/16:9)", "DALL-E 2 (便宜/1:1)"],
         index=0
     )
     
-    # 動態預算計算
-    if "DALL-E 3" in image_model:
-        selected_model = "dall-e-3"
-        cost_usd, cost_twd = 0.04, 1.3
-        quality_desc = "高清、16:9 滿版、古風細節強"
-        img_size = "1024x1792" 
+    if "DALL-E 3" in image_model_choice:
+        selected_model, cost_twd, img_size = "dall-e-3", 1.3, "1024x1792"
     else:
-        selected_model = "dall-e-2"
-        cost_usd, cost_twd = 0.02, 0.6
-        quality_desc = "普通、1:1 正方形、適合找靈感"
-        img_size = "1024x1024"
+        selected_model, cost_twd, img_size = "dall-e-2", 0.6, "1024x1024"
 
-    st.warning(f"""
-    **💸 產圖預算提醒 (每張)：**
-    - 美金：${cost_usd} USD
-    - 台幣：約 **${cost_twd}** TWD
-    - 特色：{quality_desc}
-    """)
+    st.warning(f"**💰 預估成本：** 每張約 NT$ {cost_twd}")
     st.divider()
 
     st.header("🎵 素材導入")
     lrc_file = st.file_uploader("1. 上傳 LRC", type=["lrc"])
     mp3_file = st.file_uploader("2. 上傳 MP3", type=["mp3"])
     
-    style_category = st.selectbox("Style", ["Gufeng_Real", "Lo-fi", "Neon", "Film"])
+    style_category = st.selectbox("Style", ["Gufeng", "R&B", "Lo-fi", "KTV", "Neon", "Film"])
+    
     style_map = {
-        "Gufeng_Real": "Cinematic photorealistic Gufeng, 8k, traditional Chinese architecture, silk textures, golden hour sunlight.",
-        "Lo-fi": "Chill Lo-fi aesthetic, muted colors, cozy bedroom, grainy nostalgic vibe.",
-        "Neon": "Neon Cyberpunk, magenta and cyan glow, wet street reflections.",
-        "Film": "Cinematic 35mm film, professional color grading, anamorphic flares."
+        "Gufeng": "Cinematic photorealistic Gufeng, 8k, traditional Chinese architecture, silk textures, golden hour sunlight, 16:9.",
+        "R&B": "R&B soul vibe, purple and gold lighting.",
+        "Lo-fi": "Chill Lo-fi aesthetic, muted colors, cozy bedroom.",
+        "KTV": "Classic KTV 90s style, VHS blurry texture.",
+        "Neon": "Neon Cyberpunk, magenta and cyan glow.",
+        "Film": "Cinematic 35mm film, professional color grading."
     }
+    
+    if st.button("♻️ 依照新風格重寫全場劇本"):
+        st.session_state.global_v += 1
+        st.session_state.row_versions = {}
+        for key in list(st.session_state.keys()):
+            if key.startswith("p_"): del st.session_state[key]
+        st.rerun()
 
     if st.button("🚀 啟動批量產圖"): st.session_state.is_running_batch = True
-    if st.button("🎬 合成 MV"): st.session_state.trigger_video_export = True
+    if st.button("🎬 合成滿版 16:9 MV"): st.session_state.trigger_video_export = True
     if st.button("🗑️ 清除所有暫存"):
         st.session_state.clear()
         import shutil
@@ -85,26 +74,24 @@ with st.sidebar:
 
 # --- 3. 核心函數 ---
 
-def get_mini_ai_prompt(style_label, style_cmd, lyric):
-    """【省錢編劇】"""
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {API_KEY}"}
-    prompt_msg = f"Visual Director: Describe a cinematic image for lyric '{lyric}' with style '{style_label}'. Keywords: {style_cmd}. English only, NO TEXT, NO PEOPLE."
-    payload = {
-        "model": "gpt-4o-mini",
-        "messages": [{"role": "user", "content": prompt_msg}],
-        "max_tokens": 150
-    }
-    try:
-        res = requests.post(url, headers=headers, json=payload, timeout=10)
-        return res.json()['choices'][0]['message']['content'].strip()
-    except: return f"A stunning {style_label} scene"
-
-def call_image_api(prompt):
-    """【畫師】依據側邊欄選取的模型產圖"""
+def get_dynamic_prompt(style_label, style_cmd, tag, seed_val):
+    random.seed(seed_val + st.session_state.global_v + time.time())
+    prefixes = ["A stunning", "A majestic", "A vibrant", "A breathtaking", "A sharp"]
+    angles = ["cinematic wide shot", "macro close-up", "low angle view", "wide-angle lens shot"]
+    elements = ["scenery", "texture", "horizon"]
+    
+    if "Gufeng" in style_label:
+        elements = ["ornate crimson palace walls", "ancient red wooden pavilion", "vibrant silk lanterns", "carved stone bridge", "blooming plum blossoms"]
+    
+    lighting = ["intense golden hour glow", "vivid amber sunlight", "high contrast shadows"]
+    random.shuffle(prefixes); random.shuffle(angles)
+    base = f"[{style_label}] {random.choice(prefixes)} {random.choice(angles)}"
+    return f"{base} of {random.choice(elements)}, {style_cmd}, {random.choice(lighting)}, 8k, photorealistic, 16:9. NO PEOPLE, NO TEXT."
+    
+def call_openai_api(prompt, diag):
     url = "https://api.openai.com/v1/images/generations"
-    headers = {"Authorization": f"Bearer {API_KEY}"}
-    payload = {"model": selected_model, "prompt": prompt, "n": 1, "size": img_size}
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {API_KEY}"}
+    payload = {"model": selected_model, "prompt": str(prompt), "n": 1, "size": img_size}
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=60)
         rj = res.json()
@@ -115,20 +102,59 @@ def call_image_api(prompt):
     return None
 
 def parse_perfect_logic(lrc_content, audio_duration):
-    # (此處保留妳原本強大的 LRC 解析邏輯)
+    """【完整保留】10秒補位邏輯，並洗淨歌詞雜質"""
     raw_lines = lrc_content.split('\n')
     parsed_lines = []
+    c_idx = 0
     for line in raw_lines:
-        if not line.strip() or not re.search(r"\[\d{2}:", line): continue
+        if line.startswith('{') or not line.strip() or not re.search(r"\[\d{2}:", line): continue
         match = re.search(r"\[(\d{2}):(\d{2}\.\d{2})\]", line)
+        if not match: match = re.search(r"\[(\d{2}):(\d{2})\]", line)
+        
         if match:
             m, s = match.groups()
             sec = int(m)*60 + float(s)
-            txt = re.sub(r"\[.*?\]", "", line).strip()
-            parsed_lines.append({"seconds": sec, "lyric": txt, "ts": f"{m}:{s}"})
-    return parsed_lines
+            # 洗掉字級時間標籤與括號
+            txt = re.sub(r"\[.*?\]|<.*?>|\{.*?\}|\(.*?\)", "", line).strip()
+            if txt:
+                parsed_lines.append({"count_idx": c_idx, "seconds": sec, "lyric": txt, "ts": f"{m}:{s}"})
+                c_idx += 1
+    
+    # 處理結構 Tag
+    maybe_json = re.search(r"\{.*\}", lrc_content, re.DOTALL)
+    struct = json.loads(maybe_json.group(0)).get("song_structure") if maybe_json else None
+    milestones = []
+    if struct:
+        for item in struct:
+            for tag, l_num in item.items():
+                target = int(l_num)
+                ml = next((x for x in parsed_lines if x['count_idx'] == target), None)
+                if ml: 
+                    m_copy = ml.copy()
+                    m_copy['tag'] = tag
+                    milestones.append(m_copy)
+    else: milestones = parsed_lines
 
-# --- 4. 介面渲染與執行 ---
+    final_tl, last_t = [], 0.0
+    if not milestones or milestones[0]['seconds'] > 0:
+        final_tl.append({"ts": "00:00.00", "tag": "START", "lyric": "Opening Scene", "seconds": 0.0, "count_idx": -1})
+    
+    for m in sorted(milestones, key=lambda x: x['seconds']):
+        while m['seconds'] - last_t > 10.5:
+            last_t += 10.0
+            if m['seconds'] - last_t > 1.0:
+                final_tl.append({"ts": f"{int(last_t//60):02}:{last_t%60:05.2f}", "tag": "GAP", "lyric": "Transition Scene", "seconds": last_t, "count_idx": -1})
+            else: break
+        if 'tag' not in m: m['tag'] = "Lyric"
+        final_tl.append(m)
+        last_t = m['seconds']
+
+    while audio_duration - last_t > 10.0:
+        last_t += 10.0
+        final_tl.append({"ts": f"{int(last_t//60):02}:{last_t%60:05.2f}", "tag": "END", "lyric": "Outro / Ending", "seconds": last_t, "count_idx": -1})
+    return final_tl
+
+# --- 4. 渲染邏輯 ---
 if lrc_file and mp3_file:
     if "audio_dur" not in st.session_state:
         with open("active_temp.mp3", "wb") as f: f.write(mp3_file.getvalue())
@@ -136,41 +162,45 @@ if lrc_file and mp3_file:
     
     timeline = parse_perfect_logic(lrc_file.getvalue().decode("utf-8", errors="ignore"), st.session_state.audio_dur)
     
-    # 批量產圖
     if st.session_state.get("is_running_batch", False):
         diag = st.empty()
         for i, item in enumerate(timeline):
             imk = f"img_{i}"
             if imk not in st.session_state:
                 pk = f"p_{i}"
-                if pk not in st.session_state: 
-                    st.session_state[pk] = get_mini_ai_prompt(style_category, style_map[style_category], item['lyric'])
+                if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
                 diag.warning(f"正在產圖 ({i+1}/{len(timeline)})")
-                res = call_image_api(st.session_state[pk])
+                res = call_openai_api(st.session_state[pk], diag)
                 if res:
                     with open(f"{IMG_DIR}/f_{i}.png", "wb") as f: f.write(base64.b64decode(res))
-                    st.session_state[imk] = res
+                    st.session_state[imk] = res; st.rerun()
         st.session_state.is_running_batch = False; st.rerun()
 
-    # 渲染列表
+    # --- 顯示分鏡列表 ---
     for i, item in enumerate(timeline):
         c1, c2, c3, c4 = st.columns([1.5, 4, 4, 1.8])
-        c1.markdown(f"**{item['ts']}**\n\n{item['lyric']}")
-        pk, imk = f"p_{i}", f"img_{i}"
+        c1.markdown(f"**{item['ts']}**")
+        c1.caption(f"📌 {item['tag']}\n\n📝 {item['lyric']}")
         
-        if pk not in st.session_state: 
-            st.session_state[pk] = "點擊「換劇本」生成分鏡..."
-            
-        st.session_state[pk] = c2.text_area("", st.session_state[pk], key=f"t_{i}", height=120, label_visibility="collapsed")
+        pk, imk = f"p_{i}", f"img_{i}"
+        if pk not in st.session_state.row_versions: st.session_state.row_versions[pk] = 0
+        if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
+        
+        current_v = f"v{st.session_state.global_v}_row{st.session_state.row_versions[pk]}"
+        st.session_state[pk] = c2.text_area("", st.session_state[pk], key=f"t_{i}_{current_v}", height=120, label_visibility="collapsed")
         
         if imk in st.session_state:
             c3.markdown(f'<img src="data:image/png;base64,{st.session_state[imk]}" style="width:100%; border-radius:8px;">', unsafe_allow_html=True)
-        
+            c4.download_button("💾 下載圖", base64.b64decode(st.session_state[imk]), f"img_{i}.png", key=f"dl_{i}")
+
         col_a, col_b = c4.columns(2)
-        if col_a.button("🔄 換劇本", key=f"ref_{i}"):
-            st.session_state[pk] = get_mini_ai_prompt(style_category, style_map[style_category], item['lyric'])
+        if col_a.button("🔄 換劇本", key=f"refresh_{i}"):
+            st.session_state.row_versions[pk] += 1
+            st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i + st.session_state.row_versions[pk])
             st.rerun()
         if col_b.button("🎨 產圖", key=f"btn_{i}"):
-            res = call_image_api(st.session_state[pk])
-            if res: st.session_state[imk] = res; st.rerun()
+            res = call_openai_api(st.session_state[pk], st.empty())
+            if res:
+                with open(f"{IMG_DIR}/f_{i}.png", "wb") as f: f.write(base64.b64decode(res))
+                st.session_state[imk] = res; st.rerun()
         st.divider()
