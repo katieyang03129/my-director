@@ -35,7 +35,7 @@ with st.sidebar:
     )
     
     if "DALL-E 3" in image_model_choice:
-        selected_model, cost_twd, img_size = "dall-e-3", 1.3, "1024x1792"
+        selected_model, cost_twd, img_size = "dall-e-3", 1.3, "1792x1024"
     else:
         selected_model, cost_twd, img_size = "dall-e-2", 0.6, "1024x1024"
 
