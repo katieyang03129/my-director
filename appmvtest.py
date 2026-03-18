@@ -1,3 +1,7 @@
+import PIL.Image
+# 解決 Pillow 10 移除 ANTIALIAS 導致 MoviePy 崩潰的問題
+if not hasattr(PIL.Image, 'ANTIALIAS'):
+    PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
 import streamlit as st
 import re, requests, json, time, random, os, base64, sys
 
