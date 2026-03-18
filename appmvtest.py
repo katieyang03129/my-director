@@ -153,14 +153,24 @@ if lrc_file and mp3_file:
             imk = f"img_{i}"
             if imk not in st.session_state:
                 pk = f"p_{i}"
-                if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
+                if pk not in st.session_state: 
+                    st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
+                
                 diag.warning(f"正在批量產圖 ({i+1}/{len(timeline)})")
                 res = call_openai_api(st.session_state[pk], diag)
+                
                 if res:
-                    with open(f"{IMG_DIR}/f_{i}.png", "wb") as f: f.write(base64.b64decode(res))
+                    # 💡 新加的：給檔名加一個時間戳記，確保它是唯一的新檔案
+                    fpath = f"{IMG_DIR}/f_{i}_{int(time.time())}.png"
+                    
+                    with open(fpath, "wb") as f: 
+                        f.write(base64.b64decode(res))
+                    
+                    # 💡 新加的：把這個獨一無二的路徑存起來，合成時才抓得到
+                    st.session_state[f"path_{i}"] = fpath
+                    
                     st.session_state[imk] = res; st.rerun()
         st.session_state.is_running_batch = False; st.rerun()
-
     st.subheader("🎬 導演分鏡表")
     for i, item in enumerate(timeline):
         c1, c2, c3, c4 = st.columns([1.5, 4, 4, 1.8])
@@ -197,7 +207,7 @@ if lrc_file and mp3_file:
                 audio = AudioFileClip("active_temp.mp3")
                 final_clips = []
                 for i, item in enumerate(timeline):
-                    fpath = f"{IMG_DIR}/f_{i}.png"
+                    fpath = st.session_state.get(f"path_{i}", f"{IMG_DIR}/f_{i}.png")
                     if os.path.exists(fpath):
                         with Image.open(fpath) as img:
                             w, h = img.size
