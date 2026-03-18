@@ -250,12 +250,18 @@ if lrc_file and mp3_file:
                             end_t = timeline[i+1]["seconds"] if i+1 < len(timeline) else audio.duration
                             dur = max(0.5, end_t - start_t)
                             
-                            c = ImageClip(fpath).set_duration(dur).set_start(start_t)
+                            c = ImageClip(fpath).set_start(start_t)
+                            
+                            if hasattr(c, "with_duration"):
+                                c = c.with_duration(dur)
+                            else:
+                                c = c.set_duration(dur)
+                            
                             c = c.resize(width=1920)
                             y_center = c.h / 2
                             c = c.crop(y1=y_center-540, y2=y_center+1080-540, x1=0, x2=1920)
+                            
                             final_clips.append(c)
-
                     if not final_clips:
                         st.error("❌ 合成失敗：資料夾內沒有圖片檔案，請先產圖！")
                     else:
