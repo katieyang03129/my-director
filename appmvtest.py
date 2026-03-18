@@ -250,13 +250,22 @@ if lrc_file and mp3_file:
                             end_t = timeline[i+1]["seconds"] if i+1 < len(timeline) else audio.duration
                             dur = max(0.5, end_t - start_t)
                             
-                            c = ImageClip(fpath).set_start(start_t)
+                            # --- 1. 先建立 Clip ---
+                            c = ImageClip(fpath)
                             
+                            # --- 2. 解決 set_start (2.0+ 改名為 with_start) ---
+                            if hasattr(c, "with_start"):
+                                c = c.with_start(start_t)
+                            else:
+                                c = c.set_start(start_t)
+                            
+                            # --- 3. 解決 set_duration (2.0+ 改名為 with_duration) ---
                             if hasattr(c, "with_duration"):
                                 c = c.with_duration(dur)
                             else:
                                 c = c.set_duration(dur)
                             
+                            # --- 4. 縮放與裁切 (維持妳的 16:9 邏輯) ---
                             c = c.resize(width=1920)
                             y_center = c.h / 2
                             c = c.crop(y1=y_center-540, y2=y_center+1080-540, x1=0, x2=1920)
