@@ -1,5 +1,5 @@
 import PIL.Image
-from PIL import Image  # 確保導入 PIL 處理圖像
+from PIL import Image
 # 解決 Pillow 10 移除 ANTIALIAS 導致 MoviePy 崩潰的問題
 if not hasattr(PIL.Image, 'ANTIALIAS'):
     PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
@@ -14,7 +14,7 @@ except:
     from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips, CompositeVideoClip
 
 # --- 1. 配置與安全 ---
-st.set_page_config(page_title="MV Visual Director 24.5 (Secure)", layout="wide")
+st.set_page_config(page_title="MV Visual Director 24.5", layout="wide")
 
 if "OPENAI_API_KEY" in st.secrets:
     API_KEY = st.secrets["OPENAI_API_KEY"]
@@ -39,7 +39,7 @@ with st.sidebar:
     st.success("✅ 認證成功")
     st.divider()
 
-    st.header("🤖 模型配置與預算")
+    st.header("🤖 模型配置")
     image_model_choice = st.selectbox("🎨 選擇產圖畫師", ["DALL-E 3 (精美/16:9)", "DALL-E 2 (便宜/1:1)"], index=0)
     if "DALL-E 3" in image_model_choice:
         selected_model, cost_twd, img_size = "dall-e-3", 1.3, "1792x1024"
@@ -50,6 +50,7 @@ with st.sidebar:
     lrc_file = st.file_uploader("1. 上傳 LRC", type=["lrc"])
     mp3_file = st.file_uploader("2. 上傳 MP3", type=["mp3"])
     style_category = st.selectbox("Style", ["Gufeng", "R&B", "Lo-fi", "KTV", "Neon", "Film"])
+    
     style_map = {
         "Gufeng": "Cinematic photorealistic Gufeng, 8k, traditional Chinese architecture, silk textures, golden hour sunlight, 16:9.",
         "R&B": "R&B soul vibe, purple and gold lighting.",
@@ -58,7 +59,7 @@ with st.sidebar:
         "Neon": "Neon Cyberpunk, magenta and cyan glow.",
         "Film": "Cinematic 35mm film, professional color grading."
     }
-    
+
     if st.button("🚀 啟動批量產圖"): st.session_state.is_running_batch = True
     if st.button("🎬 合成滿版 16:9 MV"): st.session_state.trigger_video_export = True
     if st.button("🗑️ 清除所有暫存"):
@@ -74,7 +75,7 @@ def get_dynamic_prompt(style_label, style_cmd, tag, seed_val):
     angles = ["cinematic wide shot", "wide-angle lens shot"]
     elements = ["scenery", "texture", "horizon"]
     if "Gufeng" in style_label:
-        elements = ["ornate crimson palace walls", "ancient red wooden pavilion", "vibrant silk lanterns", "carved stone bridge"]
+        elements = ["ornate crimson palace walls", "ancient red wooden pavilion", "vibrant silk lanterns"]
     lighting = ["intense golden hour glow", "vivid amber sunlight"]
     return f"[{style_label}] {random.choice(prefixes)} {random.choice(angles)} of {random.choice(elements)}, {style_cmd}, {random.choice(lighting)}, 8k, photorealistic, 16:9. NO PEOPLE, NO TEXT."
 
@@ -113,7 +114,6 @@ def parse_perfect_logic(lrc_content, audio_duration):
         while m['seconds'] - last_t > 10.5:
             last_t += 10.0
             final_tl.append({"ts": f"{int(last_t//60):02}:{last_t%60:05.2f}", "tag": "GAP", "lyric": "Transition", "seconds": last_t})
-        m['tag'] = "Lyric"
         final_tl.append(m)
         last_t = m['seconds']
     return final_tl
@@ -132,71 +132,83 @@ if lrc_file and mp3_file:
             imk = f"img_{i}"
             if imk not in st.session_state:
                 pk = f"p_{i}"
-                if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item.get('tag',''), i)
-                diag.warning(f"正在產圖 ({i+1}/{len(timeline)})")
+                if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], "Lyric", i)
+                diag.warning(f"正在批量產圖 ({i+1}/{len(timeline)})")
                 res = call_openai_api(st.session_state[pk], diag)
                 if res:
                     with open(f"{IMG_DIR}/f_{i}.png", "wb") as f: f.write(base64.b64decode(res))
                     st.session_state[imk] = res; st.rerun()
         st.session_state.is_running_batch = False; st.rerun()
 
+    # --- 顯示分鏡列表 ---
     for i, item in enumerate(timeline):
         c1, c2, c3, c4 = st.columns([1.5, 4, 4, 1.8])
         c1.markdown(f"**{item['ts']}**")
         c1.caption(f"📝 {item['lyric']}")
+        
         pk, imk = f"p_{i}", f"img_{i}"
-        if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item.get('tag',''), i)
-        st.session_state[pk] = c2.text_area("", st.session_state[pk], key=f"t_{i}", height=100, label_visibility="collapsed")
+        if pk not in st.session_state.row_versions: st.session_state.row_versions[pk] = 0
+        if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], "Lyric", i)
+        
+        # 顯示文案區
+        st.session_state[pk] = c2.text_area("", st.session_state[pk], key=f"t_{i}", height=120, label_visibility="collapsed")
+        
+        # 顯示圖片區
         if imk in st.session_state:
             c3.markdown(f'<img src="data:image/png;base64,{st.session_state[imk]}" style="width:100%; border-radius:8px;">', unsafe_allow_html=True)
-            if c4.button("🎨 產圖", key=f"btn_{i}"):
-                res = call_openai_api(st.session_state[pk], st.empty())
-                if res:
-                    with open(f"{IMG_DIR}/f_{i}.png", "wb") as f: f.write(base64.b64decode(res))
-                    st.session_state[imk] = res; st.rerun()
+            c4.download_button("💾 下載圖", base64.b64decode(st.session_state[imk]), f"img_{i}.png", key=f"dl_{i}")
+
+        # 功能按鈕
+        col_a, col_b = c4.columns(2)
+        if col_a.button("🔄 換劇本", key=f"refresh_{i}"):
+            st.session_state.row_versions[pk] += 1
+            st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], "Lyric", i + st.session_state.row_versions[pk])
+            st.rerun()
+        if col_b.button("🎨 產圖", key=f"btn_{i}"):
+            res = call_openai_api(st.session_state[pk], st.empty())
+            if res:
+                with open(f"{IMG_DIR}/f_{i}.png", "wb") as f: f.write(base64.b64decode(res))
+                st.session_state[imk] = res; st.rerun()
         st.divider()
 
-    # --- 5. 影片合成執行區塊 (縮排正確版) ---
+    # --- 5. 影片合成執行區塊 ---
     if st.session_state.get("trigger_video_export", False):
         st.session_state.trigger_video_export = False 
-        with st.spinner("🎬 正在使用 Pillow + MoviePy 雙引擎合成中..."):
+        with st.spinner("🎬 正在合成滿版 MV，請稍候..."):
             try:
                 audio = AudioFileClip("active_temp.mp3")
                 final_clips = []
                 for i, item in enumerate(timeline):
                     fpath = f"{IMG_DIR}/f_{i}.png"
                     if os.path.exists(fpath):
+                        # --- Pillow 預處理裁切 (最穩定解決 resize/crop 報錯) ---
+                        with Image.open(fpath) as img:
+                            w, h = img.size
+                            target_w = 1920
+                            target_h = int(h * (target_w / w))
+                            img = img.resize((target_w, target_h), Image.LANCZOS)
+                            top = (target_h - 1080) / 2
+                            img = img.crop((0, top, 1920, top + 1080))
+                            temp_p = f"{IMG_DIR}/render_{i}.jpg"
+                            img.convert("RGB").save(temp_p, quality=95)
+
+                        c = ImageClip(temp_p)
                         start_t = item["seconds"]
                         end_t = timeline[i+1]["seconds"] if i+1 < len(timeline) else audio.duration
                         dur = max(0.5, end_t - start_t)
                         
-                        # --- PIL 預處理裁切 ---
-                        with Image.open(fpath) as img:
-                            w, h = img.size
-                            # 先縮放寬度到 1920
-                            target_w = 1920
-                            target_h = int(h * (target_w / w))
-                            img = img.resize((target_w, target_h), Image.LANCZOS)
-                            # 居中裁切成 1080 高度
-                            top = (target_h - 1080) / 2
-                            img = img.crop((0, top, 1920, top + 1080))
-                            processed_path = f"{IMG_DIR}/p_{i}.jpg" # 轉存成 jpg 節省空間
-                            img.convert("RGB").save(processed_path, quality=95)
-
-                        c = ImageClip(processed_path)
-                        # 版本相容時間設置
+                        # 版本相容
                         c = c.with_start(start_t) if hasattr(c, "with_start") else c.set_start(start_t)
                         c = c.with_duration(dur) if hasattr(c, "with_duration") else c.set_duration(dur)
                         final_clips.append(c)
 
                 if final_clips:
-                    video = CompositeVideoClip(final_clips, size=(1920, 1080)).set_audio(audio)
-                    out_name = f"MV_{int(time.time())}.mp4"
+                    video = CompositeVideoClip(final_clips, size=(1920, 1080))
+                    video = video.with_audio(audio) if hasattr(video, "with_audio") else video.set_audio(audio)
+                    out_name = f"MV_Final_{int(time.time())}.mp4"
                     video.write_videofile(out_name, fps=24, codec="libx264", audio_codec="aac")
-                    st.success("✨ 16:9 滿版 MV 合成完成！")
+                    st.success("✨ MV 合成完成！")
                     with open(out_name, "rb") as f:
                         st.download_button("📥 點我下載成品影片", f, file_name=out_name)
-                else:
-                    st.error("❌ 沒有可合成的圖片")
             except Exception as e:
                 st.error(f"💥 合成失敗：{str(e)}")
