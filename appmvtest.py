@@ -24,9 +24,24 @@ if "global_v" not in st.session_state: st.session_state.global_v = 0
 if "row_versions" not in st.session_state: st.session_state.row_versions = {}
 
 # --- 2. 側邊欄：模型與素材 ---
+# --- 2. 側邊欄：門禁與模型配置 ---
 with st.sidebar:
-    st.header("🤖 模型配置與預算")
+    st.header("🔑 導演認證")
+    # 從 Secrets 抓取新密碼，若沒設定則預設為妳之前的 mv888
+    correct_password = st.secrets.get("DIRECTOR_PASSWORD", "mv888")
     
+    # 建立密碼輸入框
+    input_pw = st.text_input("輸入導演通行碼", type="password")
+    
+    # 【核心保險】密碼不對就直接停止，後面的代碼通通不跑
+    if input_pw != correct_password:
+        st.warning("🔒 請輸入正確密碼以解鎖導演台")
+        st.stop() 
+        
+    st.success("✅ 認證成功")
+    st.divider()
+
+    st.header("🤖 模型配置與預算")
     # 讓妳選產圖畫師
     image_model_choice = st.selectbox(
         "🎨 選擇產圖畫師",
@@ -71,7 +86,6 @@ with st.sidebar:
         import shutil
         if os.path.exists(IMG_DIR): shutil.rmtree(IMG_DIR)
         os.makedirs(IMG_DIR); st.rerun()
-
 # --- 3. 核心函數 ---
 
 def get_dynamic_prompt(style_label, style_cmd, tag, seed_val):
