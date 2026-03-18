@@ -261,16 +261,16 @@ if lrc_file and mp3_file:
                             # --- 3. 縮放與裁切 (這是這次噴錯的地方) ---
                             # 如果原本的 c 沒有 resize，就去 vfx 裡面抓
                             if hasattr(c, "resize"):
-                            c = c.resize(width=1920) # 舊版寫法
+                                c = c.resize(width=1920) # 舊版寫法
                             else:
-                            c = vfx.resize(c, width=1920) # 新版 2.0+ 寫法
+                                c = vfx.resize(c, width=1920) # 新版 2.0+ 寫法
                             
                             y_center = c.h / 2
                             
                             if hasattr(c, "crop"):
-                            c = c.crop(y1=y_center-540, y2=y_center+540, x1=0, x2=1920) # 舊版寫法
+                                c = c.crop(y1=y_center-540, y2=y_center+540, x1=0, x2=1920) # 舊版寫法
                             else:
-                            c = vfx.crop(c, y1=y_center-540, y2=y_center+540, x1=0, x2=1920) # 新版 2.0+ 寫法
+                                c = vfx.crop(c, y1=y_center-540, y2=y_center+540, x1=0, x2=1920) # 新版 2.0+ 寫法
                             
                             final_clips.append(c)
                     if not final_clips:
