@@ -1,3 +1,4 @@
+import moviepy.video.fx.all as vfx  # 這是新版特效的家
 import PIL.Image
 # 解決 Pillow 10 移除 ANTIALIAS 導致 MoviePy 崩潰的問題
 if not hasattr(PIL.Image, 'ANTIALIAS'):
@@ -253,22 +254,23 @@ if lrc_file and mp3_file:
                             # --- 1. 先建立 Clip ---
                             c = ImageClip(fpath)
                             
-                            # --- 2. 解決 set_start (2.0+ 改名為 with_start) ---
-                            if hasattr(c, "with_start"):
-                                c = c.with_start(start_t)
-                            else:
-                                c = c.set_start(start_t)
+                            # --- 2. 處理時間 (2.0+ 改名為 with_...) ---
+                            c = c.with_start(start_t) if hasattr(c, "with_start") else c.set_start(start_t)
+                            c = c.with_duration(dur) if hasattr(c, "with_duration") else c.set_duration(dur)
                             
-                            # --- 3. 解決 set_duration (2.0+ 改名為 with_duration) ---
-                            if hasattr(c, "with_duration"):
-                                c = c.with_duration(dur)
+                            # --- 3. 縮放與裁切 (這是這次噴錯的地方) ---
+                            # 如果原本的 c 沒有 resize，就去 vfx 裡面抓
+                            if hasattr(c, "resize"):
+                            c = c.resize(width=1920) # 舊版寫法
                             else:
-                                c = c.set_duration(dur)
+                            c = vfx.resize(c, width=1920) # 新版 2.0+ 寫法
                             
-                            # --- 4. 縮放與裁切 (維持妳的 16:9 邏輯) ---
-                            c = c.resize(width=1920)
                             y_center = c.h / 2
-                            c = c.crop(y1=y_center-540, y2=y_center+1080-540, x1=0, x2=1920)
+                            
+                            if hasattr(c, "crop"):
+                            c = c.crop(y1=y_center-540, y2=y_center+540, x1=0, x2=1920) # 舊版寫法
+                            else:
+                            c = vfx.crop(c, y1=y_center-540, y2=y_center+540, x1=0, x2=1920) # 新版 2.0+ 寫法
                             
                             final_clips.append(c)
                     if not final_clips:
