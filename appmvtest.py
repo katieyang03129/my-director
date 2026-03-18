@@ -218,3 +218,63 @@ if lrc_file and mp3_file:
                 with open(f"{IMG_DIR}/f_{i}.png", "wb") as f: f.write(base64.b64decode(res))
                 st.session_state[imk] = res; st.rerun()
         st.divider()
+# --- 5. 影片合成執行區塊 (接在最後面) ---
+if st.session_state.get("trigger_video_export", False):
+    st.session_state.trigger_video_export = False  # 重設開關避免重複觸發
+    
+    with st.spinner("🎬 正在合成 16:9 滿版 MV，請稍候..."):
+        try:
+            # 1. 確保音檔還活著 (雲端環境保險)
+            if not os.path.exists("active_temp.mp3") and mp3_file:
+                with open("active_temp.mp3", "wb") as f:
+                    f.write(mp3_file.getvalue())
+            
+            if not os.path.exists("active_temp.mp3"):
+                st.error("❌ 找不到音檔，請重新上傳 MP3")
+                st.stop()
+
+            audio = AudioFileClip("active_temp.mp3")
+            final_clips = []
+            
+            # 2. 依照 timeline 抓取圖片並裁切
+            for i, item in enumerate(timeline):
+                fpath = f"{IMG_DIR}/f_{i}.png"
+                
+                # 如果資料夾有圖，就合進去
+                if os.path.exists(fpath):
+                    start_t = item["seconds"]
+                    # 結束時間為下一段開始，或是音檔結束
+                    end_t = timeline[i+1]["seconds"] if i+1 < len(timeline) else audio.duration
+                    dur = max(0.5, end_t - start_t)
+                    
+                    # 讀取圖並調整為 16:9 (1920x1080)
+                    c = ImageClip(fpath).set_duration(dur).set_start(start_t)
+                    c = c.resize(width=1920)
+                    # 居中裁切
+                    y_center = c.h / 2
+                    c = c.crop(y1=y_center-540, y2=y_center+1080-540, x1=0, x2=1920)
+                    final_clips.append(c)
+
+            if not final_clips:
+                st.error("❌ 合成失敗：資料夾內沒有圖片檔案，請先產圖！")
+            else:
+                # 3. 渲染與匯出
+                video = CompositeVideoClip(final_clips, size=(1920, 1080)).set_audio(audio)
+                out_name = f"MV_{int(time.time())}.mp4"
+                
+                # 使用最穩定的雲端合成參數
+                video.write_videofile(
+                    out_name, 
+                    fps=24, 
+                    codec="libx264", 
+                    audio_codec="aac", 
+                    temp_audiofile='temp-audio.m4a', 
+                    remove_temp=True
+                )
+                
+                st.success("✨ 滿版 MV 合成完成！")
+                with open(out_name, "rb") as f:
+                    st.download_button("📥 點我下載成品影片", f, file_name=out_name)
+                    
+        except Exception as e:
+            st.error(f"💥 合成出錯：{str(e)}")
