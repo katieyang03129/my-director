@@ -1,4 +1,17 @@
-import moviepy.video.fx.all as vfx  # 這是新版特效的家
+# --- 修正後的導入方式 ---
+try:
+    import moviepy.video.fx.all as vfx
+except ImportError:
+    # 如果上面失敗，嘗試從另一個路徑抓取特效師
+    try:
+        from moviepy.video.fx import resize, crop
+        # 建立一個假裝是 vfx 的物件，讓後面的 vfx.resize 能跑
+        class VFX:
+            def __init__(self, r, c): self.resize = r; self.crop = c
+        vfx = VFX(resize, crop)
+    except:
+        # 如果還是失敗，代表是舊版 MoviePy，不需要 vfx
+        vfx = None
 import PIL.Image
 # 解決 Pillow 10 移除 ANTIALIAS 導致 MoviePy 崩潰的問題
 if not hasattr(PIL.Image, 'ANTIALIAS'):
