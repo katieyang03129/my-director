@@ -75,9 +75,9 @@ def get_dynamic_prompt(style_label, style_cmd, tag, seed_val):
     angles = ["cinematic wide shot", "wide-angle lens shot"]
     elements = ["scenery", "texture", "horizon"]
     if "Gufeng" in style_label:
-        elements = ["ornate crimson palace walls", "ancient red wooden pavilion", "vibrant silk lanterns"]
-    lighting = ["intense golden hour glow", "vivid amber sunlight"]
-    return f"[{style_label}] {random.choice(prefixes)} {random.choice(angles)} of {random.choice(elements)}, {style_cmd}, {random.choice(lighting)}, 8k, photorealistic, 16:9. NO PEOPLE, NO TEXT."
+        elements = ["ornate crimson palace walls", "ancient red wooden pavilion", "vibrant silk lanterns", "carved stone bridge", "blooming plum blossoms"]
+    lighting = ["intense golden hour glow", "vivid amber sunlight", "high contrast shadows"]
+    return f"[{style_label}] {random.choice(prefixes)} {random.choice(angles)} of {random.choice(elements)}, {style_cmd}, {tag}, {random.choice(lighting)}, 8k, photorealistic, 16:9. NO PEOPLE, NO TEXT."
 
 def call_openai_api(prompt, diag):
     url = "https://api.openai.com/v1/images/generations"
@@ -97,7 +97,7 @@ def parse_perfect_logic(lrc_content, audio_duration):
     parsed_lines = []
     c_idx = 0
     for line in raw_lines:
-        if not re.search(r"\[\d{2}:", line): continue
+        if line.startswith('{') or not line.strip() or not re.search(r"\[\d{2}:", line): continue
         match = re.search(r"\[(\d{2}):(\d{2}\.\d{2})\]", line)
         if not match: match = re.search(r"\[(\d{2}):(\d{2})\]", line)
         if match:
@@ -107,15 +107,36 @@ def parse_perfect_logic(lrc_content, audio_duration):
             if txt:
                 parsed_lines.append({"count_idx": c_idx, "seconds": sec, "lyric": txt, "ts": f"{m}:{s}"})
                 c_idx += 1
+    
+    maybe_json = re.search(r"\{.*\}", lrc_content, re.DOTALL)
+    struct = json.loads(maybe_json.group(0)).get("song_structure") if maybe_json else None
+    milestones = []
+    if struct:
+        for item in struct:
+            for tag, l_num in item.items():
+                target = int(l_num)
+                ml = next((x for x in parsed_lines if x['count_idx'] == target), None)
+                if ml: 
+                    m_copy = ml.copy()
+                    m_copy['tag'] = tag
+                    milestones.append(m_copy)
+    else: milestones = parsed_lines
+
     final_tl, last_t = [], 0.0
-    if not parsed_lines or parsed_lines[0]['seconds'] > 0:
+    if not milestones or milestones[0]['seconds'] > 0:
         final_tl.append({"ts": "00:00.00", "tag": "START", "lyric": "Opening Scene", "seconds": 0.0})
-    for m in sorted(parsed_lines, key=lambda x: x['seconds']):
+    for m in sorted(milestones, key=lambda x: x['seconds']):
         while m['seconds'] - last_t > 10.5:
             last_t += 10.0
-            final_tl.append({"ts": f"{int(last_t//60):02}:{last_t%60:05.2f}", "tag": "GAP", "lyric": "Transition", "seconds": last_t})
+            if m['seconds'] - last_t > 1.0:
+                final_tl.append({"ts": f"{int(last_t//60):02}:{last_t%60:05.2f}", "tag": "GAP", "lyric": "Transition Scene", "seconds": last_t})
+            else: break
+        m['tag'] = m.get('tag', 'Lyric')
         final_tl.append(m)
         last_t = m['seconds']
+    while audio_duration - last_t > 10.0:
+        last_t += 10.0
+        final_tl.append({"ts": f"{int(last_t//60):02}:{last_t%60:05.2f}", "tag": "END", "lyric": "Outro / Ending", "seconds": last_t})
     return final_tl
 
 # --- 4. 渲染邏輯 ---
@@ -132,7 +153,7 @@ if lrc_file and mp3_file:
             imk = f"img_{i}"
             if imk not in st.session_state:
                 pk = f"p_{i}"
-                if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], "Lyric", i)
+                if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
                 diag.warning(f"正在批量產圖 ({i+1}/{len(timeline)})")
                 res = call_openai_api(st.session_state[pk], diag)
                 if res:
@@ -140,29 +161,26 @@ if lrc_file and mp3_file:
                     st.session_state[imk] = res; st.rerun()
         st.session_state.is_running_batch = False; st.rerun()
 
-    # --- 顯示分鏡列表 ---
+    st.subheader("🎬 導演分鏡表")
     for i, item in enumerate(timeline):
         c1, c2, c3, c4 = st.columns([1.5, 4, 4, 1.8])
         c1.markdown(f"**{item['ts']}**")
-        c1.caption(f"📝 {item['lyric']}")
+        c1.caption(f"📌 {item['tag']}\n📝 {item['lyric']}")
         
         pk, imk = f"p_{i}", f"img_{i}"
         if pk not in st.session_state.row_versions: st.session_state.row_versions[pk] = 0
-        if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], "Lyric", i)
+        if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
         
-        # 顯示文案區
         st.session_state[pk] = c2.text_area("", st.session_state[pk], key=f"t_{i}", height=120, label_visibility="collapsed")
         
-        # 顯示圖片區
         if imk in st.session_state:
             c3.markdown(f'<img src="data:image/png;base64,{st.session_state[imk]}" style="width:100%; border-radius:8px;">', unsafe_allow_html=True)
             c4.download_button("💾 下載圖", base64.b64decode(st.session_state[imk]), f"img_{i}.png", key=f"dl_{i}")
 
-        # 功能按鈕
         col_a, col_b = c4.columns(2)
         if col_a.button("🔄 換劇本", key=f"refresh_{i}"):
             st.session_state.row_versions[pk] += 1
-            st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], "Lyric", i + st.session_state.row_versions[pk])
+            st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i + st.session_state.row_versions[pk])
             st.rerun()
         if col_b.button("🎨 產圖", key=f"btn_{i}"):
             res = call_openai_api(st.session_state[pk], st.empty())
@@ -171,21 +189,20 @@ if lrc_file and mp3_file:
                 st.session_state[imk] = res; st.rerun()
         st.divider()
 
-    # --- 5. 影片合成執行區塊 ---
+    # --- 5. 影片合成區 ---
     if st.session_state.get("trigger_video_export", False):
         st.session_state.trigger_video_export = False 
-        with st.spinner("🎬 正在合成滿版 MV，請稍候..."):
+        with st.spinner("🎬 正在合成 16:9 滿版 MV..."):
             try:
                 audio = AudioFileClip("active_temp.mp3")
                 final_clips = []
                 for i, item in enumerate(timeline):
                     fpath = f"{IMG_DIR}/f_{i}.png"
                     if os.path.exists(fpath):
-                        # --- Pillow 預處理裁切 (最穩定解決 resize/crop 報錯) ---
                         with Image.open(fpath) as img:
                             w, h = img.size
                             target_w = 1920
-                            target_h = int(h * (target_w / w))
+                            target_h = int(h * (1920 / w))
                             img = img.resize((target_w, target_h), Image.LANCZOS)
                             top = (target_h - 1080) / 2
                             img = img.crop((0, top, 1920, top + 1080))
@@ -193,19 +210,15 @@ if lrc_file and mp3_file:
                             img.convert("RGB").save(temp_p, quality=95)
 
                         c = ImageClip(temp_p)
-                        start_t = item["seconds"]
-                        end_t = timeline[i+1]["seconds"] if i+1 < len(timeline) else audio.duration
-                        dur = max(0.5, end_t - start_t)
-                        
-                        # 版本相容
-                        c = c.with_start(start_t) if hasattr(c, "with_start") else c.set_start(start_t)
+                        st_t, dur = item["seconds"], max(0.5, (timeline[i+1]["seconds"] if i+1 < len(timeline) else audio.duration) - item["seconds"])
+                        c = c.with_start(st_t) if hasattr(c, "with_start") else c.set_start(st_t)
                         c = c.with_duration(dur) if hasattr(c, "with_duration") else c.set_duration(dur)
                         final_clips.append(c)
 
                 if final_clips:
                     video = CompositeVideoClip(final_clips, size=(1920, 1080))
                     video = video.with_audio(audio) if hasattr(video, "with_audio") else video.set_audio(audio)
-                    out_name = f"MV_Final_{int(time.time())}.mp4"
+                    out_name = f"MV_{int(time.time())}.mp4"
                     video.write_videofile(out_name, fps=24, codec="libx264", audio_codec="aac")
                     st.success("✨ MV 合成完成！")
                     with open(out_name, "rb") as f:
