@@ -171,7 +171,7 @@ if lrc_file and mp3_file:
                     
                     st.session_state[imk] = res; st.rerun()
         st.session_state.is_running_batch = False; st.rerun()
-st.subheader("🎬 導演分鏡表")
+    st.subheader("🎬 導演分鏡表")
     for i, item in enumerate(timeline):
         c1, c2, c3, c4 = st.columns([1.5, 4, 4, 1.8])
         c1.markdown(f"**{item['ts']}**")
