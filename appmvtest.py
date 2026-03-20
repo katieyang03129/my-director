@@ -190,12 +190,23 @@ if lrc_file and mp3_file:
 
         col_a, col_b = c4.columns(2)
         # --- 🔄 換劇本按鈕 (修正版) ---
-        if col_a.button("🔄 換劇本", key=f"ref_btn_{i}"):
+        if col_a.button("🔄 換劇本", key=f"ref_btn_{i}_{st.session_state.row_versions[pk]}"):
+            # 1. 增加版本號
             st.session_state.row_versions[pk] += 1
-            # 強制生成新劇本並寫入 session_state
-            new_script = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i + st.session_state.row_versions[pk])
+            
+            # 2. 生成新劇本
+            new_script = get_dynamic_prompt(
+                style_category, 
+                style_map[style_category], 
+                item.get('tag', 'Lyric'), 
+                i + st.session_state.row_versions[pk]
+            )
+            
+            # 3. 直接寫入 Session，強行覆蓋
             st.session_state[pk] = new_script
-            st.rerun() # 點完立刻重整網頁，文案才會變
+            
+            # 4. 這是最重要的：立刻大喊「重新開機！」
+            st.rerun()
 
         # --- 🎨 單張產圖按鈕 (修正版) ---
         if col_b.button("🎨 產圖", key=f"gen_btn_{i}"):
