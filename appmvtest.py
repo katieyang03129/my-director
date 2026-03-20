@@ -57,6 +57,22 @@ with st.sidebar:
         "Film": "Cinematic 35mm film, professional color grading, film grain."
     }
 
+    # --- ✨ 新增功能：全場劇本重刷 ---
+    if st.button("♻️ 依照新風格重寫全場劇本"):
+        if "timeline_cache" in st.session_state:
+            # 增加全域版本號，讓隨機庫重新抽籤
+            st.session_state.global_v += 100 
+            for i, item in enumerate(st.session_state.timeline_cache):
+                pk = f"p_{i}"
+                # 根據目前選中的 style_category 重新生成劇本
+                st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item.get('tag', 'Lyric'), i + st.session_state.global_v)
+                # 重置該行的版本號，確保介面同步
+                st.session_state.row_versions[pk] = 0
+            st.success("✅ 全場劇本已更新為新風格！")
+            st.rerun()
+        else:
+            st.error("請先上傳 LRC 檔案後再執行重寫。")
+
     if st.button("🚀 啟動批量產圖"): st.session_state.is_running_batch = True
     if st.button("🎬 合成滿版 16:9 MV"): st.session_state.trigger_video_export = True
     if st.button("🗑️ 清除所有暫存"):
@@ -73,6 +89,8 @@ def get_dynamic_prompt(style_label, style_cmd, tag, seed_val):
     
     if "Gufeng" in style_label:
         elements = ["ornate crimson palace walls", "ancient red wooden pavilion", "vibrant silk lanterns", "carved stone bridge", "blooming plum blossoms"]
+    elif "KTV" in style_label:
+        elements = ["neon-lit city rain", "retro television static", "blurred disco ball reflections", "nostalgic street lights"]
     else:
         elements = ["vast scenery", "intricate texture", "distant horizon", "natural landscape"]
     
@@ -142,6 +160,8 @@ if lrc_file and mp3_file:
         st.session_state.audio_dur = AudioFileClip("active_temp.mp3").duration
     
     timeline = parse_perfect_logic(lrc_file.getvalue().decode("utf-8", errors="ignore"), st.session_state.audio_dur)
+    # 緩存 timeline 供重刷按鈕使用
+    st.session_state.timeline_cache = timeline
     
     if st.session_state.get("is_running_batch", False):
         diag = st.empty()
@@ -168,7 +188,6 @@ if lrc_file and mp3_file:
         if pk not in st.session_state.row_versions: st.session_state.row_versions[pk] = 0
         if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
         
-        # 文案區
         st.session_state[pk] = c2.text_area("劇本內容", st.session_state[pk], key=f"t_{i}_{st.session_state.row_versions[pk]}", height=120, label_visibility="collapsed")
         
         if imk in st.session_state:
@@ -189,7 +208,6 @@ if lrc_file and mp3_file:
                 st.session_state[imk] = res; st.rerun()
         st.divider()
 
-    # --- 5. 影片合成 (Pillow 預處理版) ---
     if st.session_state.get("trigger_video_export", False):
         st.session_state.trigger_video_export = False 
         with st.spinner("🎬 正在合成 16:9 滿版 MV..."):
