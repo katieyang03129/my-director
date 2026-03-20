@@ -147,6 +147,7 @@ if lrc_file and mp3_file:
     
     timeline = parse_perfect_logic(lrc_file.getvalue().decode("utf-8", errors="ignore"), st.session_state.audio_dur)
     
+    # --- 批量產圖區 ---
     if st.session_state.get("is_running_batch", False):
         diag = st.empty()
         for i, item in enumerate(timeline):
@@ -155,22 +156,16 @@ if lrc_file and mp3_file:
                 pk = f"p_{i}"
                 if pk not in st.session_state: 
                     st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
-                
                 diag.warning(f"正在批量產圖 ({i+1}/{len(timeline)})")
                 res = call_openai_api(st.session_state[pk], diag)
-                
                 if res:
-                    # 💡 新加的：給檔名加一個時間戳記，確保它是唯一的新檔案
                     fpath = f"{IMG_DIR}/f_{i}_{int(time.time())}.png"
-                    
-                    with open(fpath, "wb") as f: 
-                        f.write(base64.b64decode(res))
-                    
-                    # 💡 新加的：把這個獨一無二的路徑存起來，合成時才抓得到
-                    st.session_state[f"path_{i}"] = fpath
-                    
+                    with open(fpath, "wb") as f: f.write(base64.b64decode(res))
+                    st.session_state[f"path_{i}"] = fpath # 存下路徑
                     st.session_state[imk] = res; st.rerun()
         st.session_state.is_running_batch = False; st.rerun()
+
+    # --- 導演分鏡表顯示區 ---
     st.subheader("🎬 導演分鏡表")
     for i, item in enumerate(timeline):
         c1, c2, c3, c4 = st.columns([1.5, 4, 4, 1.8])
@@ -178,35 +173,41 @@ if lrc_file and mp3_file:
         c1.caption(f"📌 {item['tag']}\n📝 {item['lyric']}")
         
         pk, imk = f"p_{i}", f"img_{i}"
-        if pk not in st.session_state.row_versions: st.session_state.row_versions[pk] = 0
-        if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
         
-        # 這裡用 text_area 讓妳可以改文案
-        st.session_state[pk] = c2.text_area("", st.session_state[pk], key=f"t_area_{i}", height=120, label_visibility="collapsed")
+        # 初始化版本號
+        if pk not in st.session_state.row_versions: st.session_state.row_versions[pk] = 0
+        
+        # 初始化文案 (如果還沒有的話)
+        if pk not in st.session_state:
+            st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
+        
+        # 【重要】文案編輯區：這裡要連動 session_state
+        st.session_state[pk] = c2.text_area("編輯劇本", st.session_state[pk], key=f"t_area_{i}", height=120, label_visibility="collapsed")
         
         if imk in st.session_state:
             c3.markdown(f'<img src="data:image/png;base64,{st.session_state[imk]}" style="width:100%; border-radius:8px;">', unsafe_allow_html=True)
             c4.download_button("💾 下載圖", base64.b64decode(st.session_state[imk]), f"img_{i}.png", key=f"dl_btn_{i}")
 
         col_a, col_b = c4.columns(2)
-        # --- 換劇本按鈕 (確保會更新文案) ---
-        if col_a.button("🔄 換劇本", key=f"refresh_btn_{i}"):
+        # --- 🔄 換劇本按鈕 (修正版) ---
+        if col_a.button("🔄 換劇本", key=f"ref_btn_{i}"):
             st.session_state.row_versions[pk] += 1
-            st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i + st.session_state.row_versions[pk])
-            st.rerun()
+            # 強制生成新劇本並寫入 session_state
+            new_script = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i + st.session_state.row_versions[pk])
+            st.session_state[pk] = new_script
+            st.rerun() # 點完立刻重整網頁，文案才會變
 
-        # --- 單張產圖按鈕 (修正為唯一檔名，驅除幽靈) ---
+        # --- 🎨 單張產圖按鈕 (修正版) ---
         if col_b.button("🎨 產圖", key=f"gen_btn_{i}"):
             res = call_openai_api(st.session_state[pk], st.empty())
             if res:
                 unique_fpath = f"{IMG_DIR}/f_{i}_{int(time.time())}.png"
-                with open(unique_fpath, "wb") as f:
-                    f.write(base64.b64decode(res))
-                st.session_state[f"path_{i}"] = unique_fpath # 關鍵：同步唯一路徑
+                with open(unique_fpath, "wb") as f: f.write(base64.b64decode(res))
+                st.session_state[f"path_{i}"] = unique_fpath # 存下路徑供合成
                 st.session_state[imk] = res; st.rerun()
         st.divider()
 
-    # --- 5. 影片合成區 ---
+    # --- 5. 影片合成區 (修正路徑抓取) ---
     if st.session_state.get("trigger_video_export", False):
         st.session_state.trigger_video_export = False 
         with st.spinner("🎬 正在合成 16:9 滿版 MV..."):
@@ -214,7 +215,9 @@ if lrc_file and mp3_file:
                 audio = AudioFileClip("active_temp.mp3")
                 final_clips = []
                 for i, item in enumerate(timeline):
+                    # 優先抓取帶有時間戳記的新圖路徑
                     fpath = st.session_state.get(f"path_{i}", f"{IMG_DIR}/f_{i}.png")
+                    
                     if os.path.exists(fpath):
                         with Image.open(fpath) as img:
                             w, h = img.size
