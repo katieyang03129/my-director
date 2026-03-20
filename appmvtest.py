@@ -1,6 +1,5 @@
 import PIL.Image
 from PIL import Image
-# 解決 Pillow 10 移除 ANTIALIAS 導致 MoviePy 崩潰的問題
 if not hasattr(PIL.Image, 'ANTIALIAS'):
     PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
 
@@ -50,12 +49,12 @@ with st.sidebar:
     style_category = st.selectbox("Style", ["Gufeng", "R&B", "Lo-fi", "KTV", "Neon", "Film"])
     
     style_map = {
-        "Gufeng": "Cinematic photorealistic Gufeng, 8k, traditional Chinese architecture, silk textures, 16:9.",
-        "R&B": "R&B soul vibe, purple and gold lighting.",
-        "Lo-fi": "Chill Lo-fi aesthetic, muted colors.",
-        "KTV": "Classic KTV 90s style, VHS blurry texture.",
-        "Neon": "Neon Cyberpunk, magenta and cyan glow.",
-        "Film": "Cinematic 35mm film, professional color grading."
+        "Gufeng": "Cinematic photorealistic Gufeng, 8k, traditional Chinese architecture, silk textures, golden hour sunlight, 16:9.",
+        "R&B": "R&B soul vibe, purple and gold lighting, high contrast.",
+        "Lo-fi": "Chill Lo-fi aesthetic, muted colors, cozy bedroom, grainy texture.",
+        "KTV": "Classic KTV 90s style, VHS blurry texture, colorful neon glow.",
+        "Neon": "Neon Cyberpunk, magenta and cyan glow, futuristic city.",
+        "Film": "Cinematic 35mm film, professional color grading, film grain."
     }
 
     if st.button("🚀 啟動批量產圖"): st.session_state.is_running_batch = True
@@ -69,9 +68,17 @@ with st.sidebar:
 # --- 3. 核心函數 ---
 def get_dynamic_prompt(style_label, style_cmd, tag, seed_val):
     random.seed(seed_val + st.session_state.global_v + int(time.time()))
-    prefixes = ["A stunning", "A majestic", "A vibrant", "A breathtaking"]
-    elements = ["ancient red pavilion", "silk lanterns", "carved bridge"] if "Gufeng" in style_label else ["scenery"]
-    return f"[{style_label}] {random.choice(prefixes)} of {random.choice(elements)}, {style_cmd}, {tag}, 8k, photorealistic, 16:9. NO PEOPLE, NO TEXT."
+    prefixes = ["A stunning", "A majestic", "A vibrant", "A breathtaking", "A sharp", "An ethereal"]
+    angles = ["cinematic wide shot", "macro close-up", "low angle view", "wide-angle lens shot"]
+    
+    if "Gufeng" in style_label:
+        elements = ["ornate crimson palace walls", "ancient red wooden pavilion", "vibrant silk lanterns", "carved stone bridge", "blooming plum blossoms"]
+    else:
+        elements = ["vast scenery", "intricate texture", "distant horizon", "natural landscape"]
+    
+    lighting = ["intense golden hour glow", "vivid amber sunlight", "high contrast shadows", "soft moonlight"]
+    base = f"{random.choice(prefixes)} {random.choice(angles)} of {random.choice(elements)}"
+    return f"[{style_label}] {base}, {style_cmd}, {tag}, {random.choice(lighting)}, 8k, photorealistic, 16:9. NO PEOPLE, NO TEXT."
 
 def call_openai_api(prompt, diag):
     url = "https://api.openai.com/v1/images/generations"
@@ -120,12 +127,12 @@ def parse_perfect_logic(lrc_content, audio_duration):
     for m in sorted(milestones, key=lambda x: x['seconds']):
         while m['seconds'] - last_t > 10.5:
             last_t += 10.0
-            final_tl.append({"ts": f"{int(last_t//60):02}:{last_t%60:05.2f}", "tag": "GAP", "lyric": "Transition", "seconds": last_t})
+            final_tl.append({"ts": f"{int(last_t//60):02}:{last_t%60:05.2f}", "tag": "GAP", "lyric": "Transition Scene", "seconds": last_t})
         m['tag'] = m.get('tag', 'Lyric')
         final_tl.append(m); last_t = m['seconds']
     while audio_duration - last_t > 10.0:
         last_t += 10.0
-        final_tl.append({"ts": f"{int(last_t//60):02}:{last_t%60:05.2f}", "tag": "END", "lyric": "Ending", "seconds": last_t})
+        final_tl.append({"ts": f"{int(last_t//60):02}:{last_t%60:05.2f}", "tag": "END", "lyric": "Ending Outro", "seconds": last_t})
     return final_tl
 
 # --- 4. 渲染邏輯 ---
@@ -139,9 +146,8 @@ if lrc_file and mp3_file:
     if st.session_state.get("is_running_batch", False):
         diag = st.empty()
         for i, item in enumerate(timeline):
-            imk = f"img_{i}"
+            imk, pk = f"img_{i}", f"p_{i}"
             if imk not in st.session_state:
-                pk = f"p_{i}"
                 if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
                 diag.warning(f"正在批量產圖 ({i+1}/{len(timeline)})")
                 res = call_openai_api(st.session_state[pk], diag)
@@ -162,8 +168,8 @@ if lrc_file and mp3_file:
         if pk not in st.session_state.row_versions: st.session_state.row_versions[pk] = 0
         if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
         
-        # 文案區：使用動態 Key 確保換劇本後會更新
-        st.session_state[pk] = c2.text_area("劇本", st.session_state[pk], key=f"t_{i}_{st.session_state.row_versions[pk]}", height=120, label_visibility="collapsed")
+        # 文案區
+        st.session_state[pk] = c2.text_area("劇本內容", st.session_state[pk], key=f"t_{i}_{st.session_state.row_versions[pk]}", height=120, label_visibility="collapsed")
         
         if imk in st.session_state:
             c3.markdown(f'<img src="data:image/png;base64,{st.session_state[imk]}" style="width:100%; border-radius:8px;">', unsafe_allow_html=True)
@@ -183,6 +189,7 @@ if lrc_file and mp3_file:
                 st.session_state[imk] = res; st.rerun()
         st.divider()
 
+    # --- 5. 影片合成 (Pillow 預處理版) ---
     if st.session_state.get("trigger_video_export", False):
         st.session_state.trigger_video_export = False 
         with st.spinner("🎬 正在合成 16:9 滿版 MV..."):
