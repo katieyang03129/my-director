@@ -171,7 +171,7 @@ if lrc_file and mp3_file:
                     
                     st.session_state[imk] = res; st.rerun()
         st.session_state.is_running_batch = False; st.rerun()
-    st.subheader("🎬 導演分鏡表")
+st.subheader("🎬 導演分鏡表")
     for i, item in enumerate(timeline):
         c1, c2, c3, c4 = st.columns([1.5, 4, 4, 1.8])
         c1.markdown(f"**{item['ts']}**")
@@ -181,21 +181,28 @@ if lrc_file and mp3_file:
         if pk not in st.session_state.row_versions: st.session_state.row_versions[pk] = 0
         if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
         
-        st.session_state[pk] = c2.text_area("", st.session_state[pk], key=f"t_{i}", height=120, label_visibility="collapsed")
+        # 這裡用 text_area 讓妳可以改文案
+        st.session_state[pk] = c2.text_area("", st.session_state[pk], key=f"t_area_{i}", height=120, label_visibility="collapsed")
         
         if imk in st.session_state:
             c3.markdown(f'<img src="data:image/png;base64,{st.session_state[imk]}" style="width:100%; border-radius:8px;">', unsafe_allow_html=True)
-            c4.download_button("💾 下載圖", base64.b64decode(st.session_state[imk]), f"img_{i}.png", key=f"dl_{i}")
+            c4.download_button("💾 下載圖", base64.b64decode(st.session_state[imk]), f"img_{i}.png", key=f"dl_btn_{i}")
 
         col_a, col_b = c4.columns(2)
-        if col_a.button("🔄 換劇本", key=f"refresh_{i}"):
+        # --- 換劇本按鈕 (確保會更新文案) ---
+        if col_a.button("🔄 換劇本", key=f"refresh_btn_{i}"):
             st.session_state.row_versions[pk] += 1
             st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i + st.session_state.row_versions[pk])
             st.rerun()
-        if col_b.button("🎨 產圖", key=f"btn_{i}"):
+
+        # --- 單張產圖按鈕 (修正為唯一檔名，驅除幽靈) ---
+        if col_b.button("🎨 產圖", key=f"gen_btn_{i}"):
             res = call_openai_api(st.session_state[pk], st.empty())
             if res:
-                with open(f"{IMG_DIR}/f_{i}.png", "wb") as f: f.write(base64.b64decode(res))
+                unique_fpath = f"{IMG_DIR}/f_{i}_{int(time.time())}.png"
+                with open(unique_fpath, "wb") as f:
+                    f.write(base64.b64decode(res))
+                st.session_state[f"path_{i}"] = unique_fpath # 關鍵：同步唯一路徑
                 st.session_state[imk] = res; st.rerun()
         st.divider()
 
