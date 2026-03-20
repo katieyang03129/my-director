@@ -41,10 +41,8 @@ with st.sidebar:
 
     st.header("🤖 模型配置")
     image_model_choice = st.selectbox("🎨 選擇產圖畫師", ["DALL-E 3 (精美/16:9)", "DALL-E 2 (便宜/1:1)"], index=0)
-    if "DALL-E 3" in image_model_choice:
-        selected_model, cost_twd, img_size = "dall-e-3", 1.3, "1792x1024"
-    else:
-        selected_model, cost_twd, img_size = "dall-e-2", 0.6, "1024x1024"
+    selected_model = "dall-e-3" if "DALL-E 3" in image_model_choice else "dall-e-2"
+    img_size = "1792x1024" if selected_model == "dall-e-3" else "1024x1024"
 
     st.header("🎵 素材導入")
     lrc_file = st.file_uploader("1. 上傳 LRC", type=["lrc"])
@@ -52,9 +50,9 @@ with st.sidebar:
     style_category = st.selectbox("Style", ["Gufeng", "R&B", "Lo-fi", "KTV", "Neon", "Film"])
     
     style_map = {
-        "Gufeng": "Cinematic photorealistic Gufeng, 8k, traditional Chinese architecture, silk textures, golden hour sunlight, 16:9.",
+        "Gufeng": "Cinematic photorealistic Gufeng, 8k, traditional Chinese architecture, silk textures, 16:9.",
         "R&B": "R&B soul vibe, purple and gold lighting.",
-        "Lo-fi": "Chill Lo-fi aesthetic, muted colors, cozy bedroom.",
+        "Lo-fi": "Chill Lo-fi aesthetic, muted colors.",
         "KTV": "Classic KTV 90s style, VHS blurry texture.",
         "Neon": "Neon Cyberpunk, magenta and cyan glow.",
         "Film": "Cinematic 35mm film, professional color grading."
@@ -70,14 +68,10 @@ with st.sidebar:
 
 # --- 3. 核心函數 ---
 def get_dynamic_prompt(style_label, style_cmd, tag, seed_val):
-    random.seed(seed_val + st.session_state.global_v + time.time())
+    random.seed(seed_val + st.session_state.global_v + int(time.time()))
     prefixes = ["A stunning", "A majestic", "A vibrant", "A breathtaking"]
-    angles = ["cinematic wide shot", "wide-angle lens shot"]
-    elements = ["scenery", "texture", "horizon"]
-    if "Gufeng" in style_label:
-        elements = ["ornate crimson palace walls", "ancient red wooden pavilion", "vibrant silk lanterns", "carved stone bridge", "blooming plum blossoms"]
-    lighting = ["intense golden hour glow", "vivid amber sunlight", "high contrast shadows"]
-    return f"[{style_label}] {random.choice(prefixes)} {random.choice(angles)} of {random.choice(elements)}, {style_cmd}, {tag}, {random.choice(lighting)}, 8k, photorealistic, 16:9. NO PEOPLE, NO TEXT."
+    elements = ["ancient red pavilion", "silk lanterns", "carved bridge"] if "Gufeng" in style_label else ["scenery"]
+    return f"[{style_label}] {random.choice(prefixes)} of {random.choice(elements)}, {style_cmd}, {tag}, 8k, photorealistic, 16:9. NO PEOPLE, NO TEXT."
 
 def call_openai_api(prompt, diag):
     url = "https://api.openai.com/v1/images/generations"
@@ -117,9 +111,7 @@ def parse_perfect_logic(lrc_content, audio_duration):
                 target = int(l_num)
                 ml = next((x for x in parsed_lines if x['count_idx'] == target), None)
                 if ml: 
-                    m_copy = ml.copy()
-                    m_copy['tag'] = tag
-                    milestones.append(m_copy)
+                    m_copy = ml.copy(); m_copy['tag'] = tag; milestones.append(m_copy)
     else: milestones = parsed_lines
 
     final_tl, last_t = [], 0.0
@@ -128,15 +120,12 @@ def parse_perfect_logic(lrc_content, audio_duration):
     for m in sorted(milestones, key=lambda x: x['seconds']):
         while m['seconds'] - last_t > 10.5:
             last_t += 10.0
-            if m['seconds'] - last_t > 1.0:
-                final_tl.append({"ts": f"{int(last_t//60):02}:{last_t%60:05.2f}", "tag": "GAP", "lyric": "Transition Scene", "seconds": last_t})
-            else: break
+            final_tl.append({"ts": f"{int(last_t//60):02}:{last_t%60:05.2f}", "tag": "GAP", "lyric": "Transition", "seconds": last_t})
         m['tag'] = m.get('tag', 'Lyric')
-        final_tl.append(m)
-        last_t = m['seconds']
+        final_tl.append(m); last_t = m['seconds']
     while audio_duration - last_t > 10.0:
         last_t += 10.0
-        final_tl.append({"ts": f"{int(last_t//60):02}:{last_t%60:05.2f}", "tag": "END", "lyric": "Outro / Ending", "seconds": last_t})
+        final_tl.append({"ts": f"{int(last_t//60):02}:{last_t%60:05.2f}", "tag": "END", "lyric": "Ending", "seconds": last_t})
     return final_tl
 
 # --- 4. 渲染邏輯 ---
@@ -147,25 +136,22 @@ if lrc_file and mp3_file:
     
     timeline = parse_perfect_logic(lrc_file.getvalue().decode("utf-8", errors="ignore"), st.session_state.audio_dur)
     
-    # --- 批量產圖區 ---
     if st.session_state.get("is_running_batch", False):
         diag = st.empty()
         for i, item in enumerate(timeline):
             imk = f"img_{i}"
             if imk not in st.session_state:
                 pk = f"p_{i}"
-                if pk not in st.session_state: 
-                    st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
+                if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
                 diag.warning(f"正在批量產圖 ({i+1}/{len(timeline)})")
                 res = call_openai_api(st.session_state[pk], diag)
                 if res:
                     fpath = f"{IMG_DIR}/f_{i}_{int(time.time())}.png"
                     with open(fpath, "wb") as f: f.write(base64.b64decode(res))
-                    st.session_state[f"path_{i}"] = fpath # 存下路徑
+                    st.session_state[f"path_{i}"] = fpath
                     st.session_state[imk] = res; st.rerun()
         st.session_state.is_running_batch = False; st.rerun()
 
-    # --- 導演分鏡表顯示區 ---
     st.subheader("🎬 導演分鏡表")
     for i, item in enumerate(timeline):
         c1, c2, c3, c4 = st.columns([1.5, 4, 4, 1.8])
@@ -173,52 +159,30 @@ if lrc_file and mp3_file:
         c1.caption(f"📌 {item['tag']}\n📝 {item['lyric']}")
         
         pk, imk = f"p_{i}", f"img_{i}"
-        
-        # 初始化版本號
         if pk not in st.session_state.row_versions: st.session_state.row_versions[pk] = 0
+        if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
         
-        # 初始化文案 (如果還沒有的話)
-        if pk not in st.session_state:
-            st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
-        
-        # 【重要】文案編輯區：這裡要連動 session_state
-        st.session_state[pk] = c2.text_area("編輯劇本", st.session_state[pk], key=f"t_area_{i}", height=120, label_visibility="collapsed")
+        # 文案區：使用動態 Key 確保換劇本後會更新
+        st.session_state[pk] = c2.text_area("劇本", st.session_state[pk], key=f"t_{i}_{st.session_state.row_versions[pk]}", height=120, label_visibility="collapsed")
         
         if imk in st.session_state:
             c3.markdown(f'<img src="data:image/png;base64,{st.session_state[imk]}" style="width:100%; border-radius:8px;">', unsafe_allow_html=True)
-            c4.download_button("💾 下載圖", base64.b64decode(st.session_state[imk]), f"img_{i}.png", key=f"dl_btn_{i}")
+            c4.download_button("💾 下載圖", base64.b64decode(st.session_state[imk]), f"img_{i}.png", key=f"dl_{i}")
 
         col_a, col_b = c4.columns(2)
-        # --- 🔄 換劇本按鈕 (修正版) ---
-        if col_a.button("🔄 換劇本", key=f"ref_btn_{i}_{st.session_state.row_versions[pk]}"):
-            # 1. 增加版本號
+        if col_a.button("🔄 換劇本", key=f"ref_{i}"):
             st.session_state.row_versions[pk] += 1
-            
-            # 2. 生成新劇本
-            new_script = get_dynamic_prompt(
-                style_category, 
-                style_map[style_category], 
-                item.get('tag', 'Lyric'), 
-                i + st.session_state.row_versions[pk]
-            )
-            
-            # 3. 直接寫入 Session，強行覆蓋
-            st.session_state[pk] = new_script
-            
-            # 4. 這是最重要的：立刻大喊「重新開機！」
+            st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i + st.session_state.row_versions[pk])
             st.rerun()
-
-        # --- 🎨 單張產圖按鈕 (修正版) ---
-        if col_b.button("🎨 產圖", key=f"gen_btn_{i}"):
+        if col_b.button("🎨 產圖", key=f"gen_{i}"):
             res = call_openai_api(st.session_state[pk], st.empty())
             if res:
-                unique_fpath = f"{IMG_DIR}/f_{i}_{int(time.time())}.png"
-                with open(unique_fpath, "wb") as f: f.write(base64.b64decode(res))
-                st.session_state[f"path_{i}"] = unique_fpath # 存下路徑供合成
+                fpath = f"{IMG_DIR}/f_{i}_{int(time.time())}.png"
+                with open(fpath, "wb") as f: f.write(base64.b64decode(res))
+                st.session_state[f"path_{i}"] = fpath
                 st.session_state[imk] = res; st.rerun()
         st.divider()
 
-    # --- 5. 影片合成區 (修正路徑抓取) ---
     if st.session_state.get("trigger_video_export", False):
         st.session_state.trigger_video_export = False 
         with st.spinner("🎬 正在合成 16:9 滿版 MV..."):
@@ -226,9 +190,7 @@ if lrc_file and mp3_file:
                 audio = AudioFileClip("active_temp.mp3")
                 final_clips = []
                 for i, item in enumerate(timeline):
-                    # 優先抓取帶有時間戳記的新圖路徑
                     fpath = st.session_state.get(f"path_{i}", f"{IMG_DIR}/f_{i}.png")
-                    
                     if os.path.exists(fpath):
                         with Image.open(fpath) as img:
                             w, h = img.size
@@ -239,7 +201,6 @@ if lrc_file and mp3_file:
                             img = img.crop((0, top, 1920, top + 1080))
                             temp_p = f"{IMG_DIR}/render_{i}.jpg"
                             img.convert("RGB").save(temp_p, quality=95)
-
                         c = ImageClip(temp_p)
                         st_t, dur = item["seconds"], max(0.5, (timeline[i+1]["seconds"] if i+1 < len(timeline) else audio.duration) - item["seconds"])
                         c = c.with_start(st_t) if hasattr(c, "with_start") else c.set_start(st_t)
@@ -254,5 +215,4 @@ if lrc_file and mp3_file:
                     st.success("✨ MV 合成完成！")
                     with open(out_name, "rb") as f:
                         st.download_button("📥 點我下載成品影片", f, file_name=out_name)
-            except Exception as e:
-                st.error(f"💥 合成失敗：{str(e)}")
+            except Exception as e: st.error(f"💥 合成失敗：{str(e)}")
