@@ -137,17 +137,31 @@ with st.sidebar:
         "Film": "Cinematic 35mm film, professional color grading, film grain."
     }
 
+# --- ✨ 修復版：全場劇本重刷 ---
     if st.button("♻️ 依照新風格重寫全場劇本"):
-        if "timeline_cache" in st.session_state:
-            st.session_state.global_v += 100 
+        if "timeline_cache" in st.session_state and st.session_state.timeline_cache:
+            # 1. 增加全域版本號，讓隨機庫重新抽籤
+            st.session_state.global_v += random.randint(1, 1000)
+            
+            # 2. 強制遍歷並更換所有 p_i 的內容
             for i, item in enumerate(st.session_state.timeline_cache):
                 pk = f"p_{i}"
-                st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item.get('tag', 'Lyric'), i + st.session_state.global_v)
-                st.session_state.row_versions[pk] = 0
-            st.success("✅ 全場劇本已更新！")
-            st.rerun()
+                # 重新呼叫函數產生新咒語
+                new_prompt = get_dynamic_prompt(
+                    style_category, 
+                    style_map[style_category], 
+                    item.get('tag', 'Lyric'), 
+                    i + st.session_state.global_v
+                )
+                st.session_state[pk] = new_prompt
+                # 3. 更新 row_versions 讓 text_area 的 key 改變，強制介面重繪
+                st.session_state.row_versions[pk] = st.session_state.row_versions.get(pk, 0) + 1
+            
+            st.success(f"✅ 全場劇本已更新為 {style_category} 風格！")
+            time.sleep(0.5) # 給一點反應時間
+            st.rerun() # 強制刷新頁面看到成果
         else:
-            st.error("請先上傳 LRC 檔案。")
+            st.error("❌ 請先上傳檔案並產生分鏡表後再重刷。")
 
     if st.button("🚀 啟動批量產圖"): st.session_state.is_running_batch = True
     if st.button("🎬 合成滿版 16:9 MV"): st.session_state.trigger_video_export = True
