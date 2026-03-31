@@ -12,78 +12,12 @@ try:
 except:
     from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips, CompositeVideoClip
 
-# --- 1. 配置與安全 ---
-st.set_page_config(page_title="MV Visual Director 24.5", layout="wide")
+# --- 1. 核心函數定義 (必須放在最前面，防止 NameError) ---
 
-if "OPENAI_API_KEY" in st.secrets:
-    API_KEY = st.secrets["OPENAI_API_KEY"]
-else:
-    st.error("❌ 請在 Streamlit Secrets 設置 OPENAI_API_KEY")
-    st.stop()
-
-IMG_DIR = "generated_frames"
-if not os.path.exists(IMG_DIR): os.makedirs(IMG_DIR)
-
-if "global_v" not in st.session_state: st.session_state.global_v = 0
-if "row_versions" not in st.session_state: st.session_state.row_versions = {}
-
-# --- 2. 側邊欄 ---
-with st.sidebar:
-    st.header("🔑 導演認證")
-    correct_password = st.secrets.get("DIRECTOR_PASSWORD", "mv888")
-    input_pw = st.text_input("輸入導演通行碼", type="password")
-    if input_pw != correct_password:
-        st.warning("🔒 請輸入正確密碼以解鎖導演台")
-        st.stop() 
-    st.success("✅ 認證成功")
-    st.divider()
-
-    st.header("🤖 模型配置")
-    image_model_choice = st.selectbox("🎨 選擇產圖畫師", ["DALL-E 3 (精美/16:9)", "DALL-E 2 (便宜/1:1)"], index=0)
-    selected_model = "dall-e-3" if "DALL-E 3" in image_model_choice else "dall-e-2"
-    img_size = "1792x1024" if selected_model == "dall-e-3" else "1024x1024"
-
-    st.header("🎵 素材導入")
-    lrc_file = st.file_uploader("1. 上傳 LRC", type=["lrc"])
-    mp3_file = st.file_uploader("2. 上傳 MP3", type=["mp3"])
-    style_category = st.selectbox("Style", ["Gufeng", "R&B", "Lo-fi", "KTV", "Neon", "Film"])
-    
-    style_map = {
-        "Gufeng": "Cinematic photorealistic Gufeng, 8k, traditional Chinese architecture, silk textures, golden hour sunlight, 16:9.",
-        "R&B": "R&B soul vibe, purple and gold lighting, high contrast.",
-        "Lo-fi": "Chill Lo-fi aesthetic, muted colors, cozy bedroom, grainy texture.",
-        "KTV": "Classic KTV 90s style, VHS blurry texture, colorful neon glow.",
-        "Neon": "Neon Cyberpunk, magenta and cyan glow, futuristic city.",
-        "Film": "Cinematic 35mm film, professional color grading, film grain."
-    }
-
-    # --- ✨ 新增功能：全場劇本重刷 ---
-    if st.button("♻️ 依照新風格重寫全場劇本"):
-        if "timeline_cache" in st.session_state:
-            # 增加全域版本號，讓隨機庫重新抽籤
-            st.session_state.global_v += 100 
-            for i, item in enumerate(st.session_state.timeline_cache):
-                pk = f"p_{i}"
-                # 根據目前選中的 style_category 重新生成劇本
-                st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item.get('tag', 'Lyric'), i + st.session_state.global_v)
-                # 重置該行的版本號，確保介面同步
-                st.session_state.row_versions[pk] = 0
-            st.success("✅ 全場劇本已更新為新風格！")
-            st.rerun()
-        else:
-            st.error("請先上傳 LRC 檔案後再執行重寫。")
-
-    if st.button("🚀 啟動批量產圖"): st.session_state.is_running_batch = True
-    if st.button("🎬 合成滿版 16:9 MV"): st.session_state.trigger_video_export = True
-    if st.button("🗑️ 清除所有暫存"):
-        st.session_state.clear()
-        import shutil
-        if os.path.exists(IMG_DIR): shutil.rmtree(IMG_DIR)
-        os.makedirs(IMG_DIR); st.rerun()
-
-# --- 3. 核心函數 ---
 def get_dynamic_prompt(style_label, style_cmd, tag, seed_val):
-    random.seed(seed_val + st.session_state.global_v + int(time.time()))
+    """根據風格與歌詞標籤動態生成 AI 繪圖咒語"""
+    # 這裡加入 global_v 確保重刷時隨機結果會改變
+    random.seed(seed_val + st.session_state.get('global_v', 0) + int(time.time()))
     prefixes = ["A stunning", "A majestic", "A vibrant", "A breathtaking", "A sharp", "An ethereal"]
     angles = ["cinematic wide shot", "macro close-up", "low angle view", "wide-angle lens shot"]
     
@@ -98,20 +32,25 @@ def get_dynamic_prompt(style_label, style_cmd, tag, seed_val):
     base = f"{random.choice(prefixes)} {random.choice(angles)} of {random.choice(elements)}"
     return f"[{style_label}] {base}, {style_cmd}, {tag}, {random.choice(lighting)}, 8k, photorealistic, 16:9. NO PEOPLE, NO TEXT."
 
-def call_openai_api(prompt, diag):
+def call_openai_api(prompt, diag, model_name, size_str):
+    """呼叫 OpenAI DALL-E API 產圖"""
     url = "https://api.openai.com/v1/images/generations"
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {API_KEY}"}
-    payload = {"model": selected_model, "prompt": str(prompt), "n": 1, "size": img_size}
+    payload = {"model": model_name, "prompt": str(prompt), "n": 1, "size": size_str}
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=60)
         rj = res.json()
         if res.status_code == 200:
             img_url = rj['data'][0]['url']
             return base64.b64encode(requests.get(img_url).content).decode('utf-8')
-    except: pass
+        else:
+            st.error(f"API 錯誤: {rj.get('error', {}).get('message', '未知錯誤')}")
+    except Exception as e:
+        st.error(f"連線失敗: {str(e)}")
     return None
 
 def parse_perfect_logic(lrc_content, audio_duration):
+    """解析 LRC 並結合歌曲結構 JSON"""
     raw_lines = lrc_content.split('\n')
     parsed_lines = []
     c_idx = 0
@@ -153,14 +92,78 @@ def parse_perfect_logic(lrc_content, audio_duration):
         final_tl.append({"ts": f"{int(last_t//60):02}:{last_t%60:05.2f}", "tag": "END", "lyric": "Ending Outro", "seconds": last_t})
     return final_tl
 
-# --- 4. 渲染邏輯 ---
+# --- 2. 配置與安全 ---
+st.set_page_config(page_title="MV Visual Director 24.5", layout="wide")
+
+if "OPENAI_API_KEY" in st.secrets:
+    API_KEY = st.secrets["OPENAI_API_KEY"]
+else:
+    st.error("❌ 請在 Streamlit Secrets 設置 OPENAI_API_KEY")
+    st.stop()
+
+IMG_DIR = "generated_frames"
+if not os.path.exists(IMG_DIR): os.makedirs(IMG_DIR)
+
+if "global_v" not in st.session_state: st.session_state.global_v = 0
+if "row_versions" not in st.session_state: st.session_state.row_versions = {}
+
+# --- 3. 側邊欄 ---
+with st.sidebar:
+    st.header("🔑 導演認證")
+    correct_password = st.secrets.get("DIRECTOR_PASSWORD", "mv888")
+    input_pw = st.text_input("輸入導演通行碼", type="password")
+    if input_pw != correct_password:
+        st.warning("🔒 請輸入正確密碼以解鎖導演台")
+        st.stop() 
+    st.success("✅ 認證成功")
+    st.divider()
+
+    st.header("🤖 模型配置")
+    image_model_choice = st.selectbox("🎨 選擇產圖畫師", ["DALL-E 3 (精美/16:9)", "DALL-E 2 (便宜/1:1)"], index=0)
+    selected_model = "dall-e-3" if "DALL-E 3" in image_model_choice else "dall-e-2"
+    img_size = "1792x1024" if selected_model == "dall-e-3" else "1024x1024"
+
+    st.header("🎵 素材導入")
+    lrc_file = st.file_uploader("1. 上傳 LRC", type=["lrc"])
+    mp3_file = st.file_uploader("2. 上傳 MP3", type=["mp3"])
+    style_category = st.selectbox("Style", ["Gufeng", "R&B", "Lo-fi", "KTV", "Neon", "Film"])
+    
+    style_map = {
+        "Gufeng": "Cinematic photorealistic Gufeng, 8k, traditional Chinese architecture, silk textures, golden hour sunlight, 16:9.",
+        "R&B": "R&B soul vibe, purple and gold lighting, high contrast.",
+        "Lo-fi": "Chill Lo-fi aesthetic, muted colors, cozy bedroom, grainy texture.",
+        "KTV": "Classic KTV 90s style, VHS blurry texture, colorful neon glow.",
+        "Neon": "Neon Cyberpunk, magenta and cyan glow, futuristic city.",
+        "Film": "Cinematic 35mm film, professional color grading, film grain."
+    }
+
+    if st.button("♻️ 依照新風格重寫全場劇本"):
+        if "timeline_cache" in st.session_state:
+            st.session_state.global_v += 100 
+            for i, item in enumerate(st.session_state.timeline_cache):
+                pk = f"p_{i}"
+                st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item.get('tag', 'Lyric'), i + st.session_state.global_v)
+                st.session_state.row_versions[pk] = 0
+            st.success("✅ 全場劇本已更新！")
+            st.rerun()
+        else:
+            st.error("請先上傳 LRC 檔案。")
+
+    if st.button("🚀 啟動批量產圖"): st.session_state.is_running_batch = True
+    if st.button("🎬 合成滿版 16:9 MV"): st.session_state.trigger_video_export = True
+    if st.button("🗑️ 清除所有暫存"):
+        st.session_state.clear()
+        import shutil
+        if os.path.exists(IMG_DIR): shutil.rmtree(IMG_DIR)
+        os.makedirs(IMG_DIR); st.rerun()
+
+# --- 4. 流程邏輯 ---
 if lrc_file and mp3_file:
     if "audio_dur" not in st.session_state:
         with open("active_temp.mp3", "wb") as f: f.write(mp3_file.getvalue())
         st.session_state.audio_dur = AudioFileClip("active_temp.mp3").duration
     
     timeline = parse_perfect_logic(lrc_file.getvalue().decode("utf-8", errors="ignore"), st.session_state.audio_dur)
-    # 緩存 timeline 供重刷按鈕使用
     st.session_state.timeline_cache = timeline
     
     if st.session_state.get("is_running_batch", False):
@@ -170,7 +173,7 @@ if lrc_file and mp3_file:
             if imk not in st.session_state:
                 if pk not in st.session_state: st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i)
                 diag.warning(f"正在批量產圖 ({i+1}/{len(timeline)})")
-                res = call_openai_api(st.session_state[pk], diag)
+                res = call_openai_api(st.session_state[pk], diag, selected_model, img_size)
                 if res:
                     fpath = f"{IMG_DIR}/f_{i}_{int(time.time())}.png"
                     with open(fpath, "wb") as f: f.write(base64.b64decode(res))
@@ -200,7 +203,7 @@ if lrc_file and mp3_file:
             st.session_state[pk] = get_dynamic_prompt(style_category, style_map[style_category], item['tag'], i + st.session_state.row_versions[pk])
             st.rerun()
         if col_b.button("🎨 產圖", key=f"gen_{i}"):
-            res = call_openai_api(st.session_state[pk], st.empty())
+            res = call_openai_api(st.session_state[pk], st.empty(), selected_model, img_size)
             if res:
                 fpath = f"{IMG_DIR}/f_{i}_{int(time.time())}.png"
                 with open(fpath, "wb") as f: f.write(base64.b64decode(res))
@@ -236,7 +239,7 @@ if lrc_file and mp3_file:
                     video = CompositeVideoClip(final_clips, size=(1920, 1080))
                     video = video.with_audio(audio) if hasattr(video, "with_audio") else video.set_audio(audio)
                     out_name = f"MV_{int(time.time())}.mp4"
-                    video.write_videofile(out_name, fps=24, codec="libx264", audio_codec="aac")
+                    video.write_videofile(out_name, fps=24, threads=4, codec="libx264", audio_codec="aac")
                     st.success("✨ MV 合成完成！")
                     with open(out_name, "rb") as f:
                         st.download_button("📥 點我下載成品影片", f, file_name=out_name)
